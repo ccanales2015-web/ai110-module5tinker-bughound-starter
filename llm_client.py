@@ -34,8 +34,10 @@ class GeminiClient:
 
         # Import here so heuristic mode doesn't require the dependency at import time.
         from google import genai
+        from google.genai import types
 
         self.client = genai.Client(api_key=api_key)
+        self.types = types
         self.model_name = model_name
         self.temperature = float(temperature)
 
@@ -49,9 +51,12 @@ class GeminiClient:
         try:
             merged_prompt = f"{system_prompt}\n\n{user_prompt}".strip()
             response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=merged_prompt,
-            )
+            model=self.model_name,
+            contents=merged_prompt,
+            config=self.types.GenerateContentConfig(
+                temperature=self.temperature
+                ),
+)
 
             # Defensive: response.text can be None or raise an error if blocked by filters.
             return response.text or ""

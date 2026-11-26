@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import ast
 from typing import Any, Dict, List, Optional, Tuple
 
 from reliability.risk_assessor import assess_risk
@@ -8,6 +9,104 @@ from reliability.risk_assessor import assess_risk
 # Directory where prompt templates live, relative to this file
 PROMPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
 
+def _replace_print_calls_with_logging(code: str) -> str:
+    """Replace ordinary positional print calls with logging calls."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code
+
+    # Avoid overlapping replacements from nested print() calls.
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+
+        if not isinstance(node.func, ast.Name) or node.func.id != "print":
+            continue
+
+        nested_print = any(
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Name)
+            and child.func.id == "print"
+            for child in ast.walk(node)
+            if child is not node
+        )
+
+        if nested_print:
+            return code
+
+    lines = code.splitlines(keepends=True)
+    offsets = [0]
+
+    for line in lines:
+        offsets.append(offsets[-1] + len(line))
+
+    def absolute_position(lineno: int, column: int) -> int:
+        line = lines[lineno - 1]
+        char_column = len(
+            line.encode("utf-8")[:column].decode("utf-8")
+        )
+        return offsets[lineno - 1] + char_column
+
+    replacements = []
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+
+        if not isinstance(node.func, ast.Name) or node.func.id != "print":
+            continue
+
+        # Leave calls with keyword arguments unchanged for human review.
+        if node.keywords:
+            continue
+
+        args = [
+            ast.get_source_segment(code, arg)
+            for arg in node.args
+        ]
+
+        if any(arg is None for arg in args):
+            continue
+
+        if not args:
+            replacement = 'logging.info("")'
+
+        elif (
+            isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+            and len(args) > 1
+        ):
+            message = node.args[0].value.replace("%", "%%")
+            message += " %s" * (len(args) - 1)
+
+            replacement = (
+                f"logging.info({json.dumps(message, ensure_ascii=False)}, "
+                f"{', '.join(args[1:])})"
+            )
+
+        elif len(args) == 1:
+            replacement = f"logging.info({args[0]})"
+
+        else:
+            message = " ".join(["%s"] * len(args))
+            replacement = (
+                f"logging.info({json.dumps(message)}, "
+                f"{', '.join(args)})"
+            )
+
+        start = absolute_position(node.lineno, node.col_offset)
+        end = absolute_position(node.end_lineno, node.end_col_offset)
+
+        replacements.append((start, end, replacement))
+
+    # Replace from the end so earlier source positions remain valid.
+    for start, end, replacement in sorted(
+        replacements, reverse=True
+    ):
+        code = code[:start] + replacement + code[end:]
+
+    return code
 
 def _load_prompt(filename: str) -> str:
     """Load a prompt template from the prompts/ folder."""
@@ -166,7 +265,7 @@ class BugHoundAgent:
         if any(i.get("type") == "Code Quality" for i in issues):
             if "import logging" not in fixed:
                 fixed = "import logging\n\n" + fixed
-            fixed = fixed.replace("print(", "logging.info(")
+            fixed = _replace_print_calls_with_logging(fixed)
 
         return fixed
 
