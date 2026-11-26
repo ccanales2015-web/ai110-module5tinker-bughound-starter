@@ -170,7 +170,7 @@ These failures demonstrated that apparently simple automated text substitutions 
 
 A complete empirical comparison between heuristic mode and Gemini mode was not performed.
 
-Heuristic mode was exercised extensively, including through the Streamlit application and automated regression tests.
+Heuristic mode was exercised through the Streamlit application and automated regression tests. These tests evaluated specific detection rules, proposed corrections, risk-assessment behavior, and human-review safeguards. They do not establish the overall accuracy of the heuristic system across arbitrary Python programs.
 
 Gemini's request configuration was tested using mocked components. These tests verified that the selected model, temperature, and prompts were passed to the simulated API interface. API error handling was also tested.
 
@@ -185,7 +185,7 @@ However, these tests do not establish how Gemini performs when analyzing actual 
 
 **Gemini behavior:** Live detection accuracy, correction quality, and differences from heuristic behavior remain unverified.
 
-**Risk scorer:** Its recommendations were useful in the tested scenarios. For example, it assigned a low risk score to an ordinary logging replacement while withholding automatic approval for more complicated transformations.
+**Risk scorer:** Its recommendations were appropriate in the tested scenarios. For example, it assigned a low risk score to an ordinary logging replacement while withholding automatic approval for transformations involving unsupported keyword arguments or removed return statements. However, these results do not establish the reliability of its scoring across all possible code changes.
 
 A future experiment should run identical snippets through both modes and compare detection accuracy, correction quality, and risk-assessment results.
 
@@ -207,17 +207,19 @@ The current implementation already incorporates this safeguard through a safety 
 
 Human judgment remains necessary because syntactic validity and basic structural checks cannot establish complete behavioral equivalence.
 
+The current safeguard compares the total number of return statements rather than verifying their semantic equivalence or their correspondence within individual functions. Consequently, it can detect certain structural changes but cannot guarantee behavioral preservation.
+
 ## 8) Improvement idea
 
-One improvement would be to expand AST-based analysis and validation so that BugHound can distinguish actual executable statements from strings, comments, and nested expressions more consistently.
+One improvement would be to expand AST-based analysis and validation so that BugHound can evaluate not only the presence of executable statements but also certain changes in program structure and behavior.
 
-This would reduce false-positive detections and make automated transformations more reliable.
+The existing AST-based print transformation and return-statement checks provide a foundation for this improvement. However, counting structural elements alone cannot establish that a proposed correction preserves the original program's behavior.
 
-The existing AST-based print transformation and return-statement checks provide a foundation for this improvement.
+For example, a correction could retain the same number of return statements while changing the values returned or the conditions under which they execute.
 
-Additional targeted tests should cover strings, comments, nested function calls, keyword arguments, and changes to function behavior.
+Additional targeted tests should examine strings, comments, nested function calls, keyword arguments, changes to return values, and modifications to conditional logic.
 
-This would improve reliability without requiring a substantially more complicated architecture.
+This would improve reliability by detecting a broader range of potentially unsafe transformations without requiring a substantially more complicated architecture.
 
 ---
 
